@@ -1,0 +1,31 @@
+FROM python:3.9.19-alpine3.20  
+  
+WORKDIR /app  
+  
+# Update APK repositories to use HTTP instead of HTTPS  
+RUN sed -i 's/https/http/' /etc/apk/repositories  
+  
+# Ensure package lists are up-to-date and install necessary packages  
+RUN apk update && \  
+    apk --no-cache add curl git pandoc tmux
+  
+# Ensure Git uses OpenSSL  
+RUN git config --global http.sslBackend openssl
+
+# Copy the requirements file and install Python dependencies  
+COPY ./requirements.txt /app/requirements.txt  
+RUN pip install uv
+RUN uv pip install --upgrade -r /app/requirements.txt --system
+  
+# Copy your main application code
+COPY . /app/
+
+# Copy and make startup script executable
+COPY ./start-migration.sh /app/start-migration.sh
+RUN chmod +x /app/start-migration.sh
+
+# Set TERM environment variable for better tmux experience
+ENV TERM=xterm-256color
+
+# Use startup script as default command
+CMD ["/app/start-migration.sh"]

@@ -1,0 +1,104 @@
+CONFLUENCE WIKI MARKUP SYNTAX GUIDE
+
+1. TEXT FORMATTING
+- Italic: *text*
+- Bold: **text**
+- Bold and Italic: ***text***
+- Strikethrough: ~~text~~
+
+2. HEADINGS
+- h1: h1. Text
+- h2: h2. Text
+- h3: h3. Text
+- h4: h4. Text
+- h5: h5. Text
+- h6: h6. Text
+
+3. LISTS
+BULLETED LISTS
+- Use asterisk '*' followed by a space
+- Add more '*' to create nested levels
+- Each additional '*' adds a sub-item level
+
+Example:
+* Top-level item
+* Another top-level item
+** First sub-item
+** Second sub-item
+* Third top-level item
+
+NUMBERED LISTS
+- Use '#' followed by a space
+- Add more '#' to create nested numbered levels
+- Each additional '#' adds a sub-item level
+
+Example:
+# First numbered item
+# Second numbered item
+## First sub numbered item
+## Second sub numbered item
+# Third numbered item
+
+MIXED LISTS
+- Use mixture of '*' and '#' for mixed list
+- '*' for bulleted
+- '#' for numbered
+
+Example:
+# a numbered item
+# a numbered item
+#* a bulleted sub-item
+#* a bulleted sub-item
+#** another bulleted sub-item of the upper level bulleted sub-item
+# a numbered item
+
+4. LINKS
+Internal Links:
+- [Page Title]
+- [Display Text|Page Title]
+- [Another Space:Page Title]
+
+External Links:
+- [http://example.com]
+- [Display Text|http://example.com]
+- [Display Text|http://example.com|target="_blank"]
+
+5. TABLES
+|| Header 1 || Header 2 ||
+| Cell 1 | Cell 2 |
+
+6. SPECIAL FORMATTING
+Code Block:
+{code}
+Code here
+{code}
+
+Blockquote:
+{quote}
+Quote text
+{quote}
+
+Color/Highlight:
+- {color:red}Red text{color}
+- {background:yellow}Highlighted text{background}
+
+Panels:
+{panel}
+Panel content
+{panel}
+
+7. ADVANCED FORMATTING
+- Horizontal Rule: ----
+- Table of Contents: {toc}
+- Include Page: {include:Page Name}
+- List Child Pages: {children}
+
+8. SPECIAL CHARACTERS
+- {html}: Allow HTML
+- {noformat}: Preserve formatting
+- \: Escape special characters
+
+9. EMOTICONS
+- :) - Smile
+- :( - Sad
+- ;) - Wink

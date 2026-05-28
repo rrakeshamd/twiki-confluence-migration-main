@@ -1,0 +1,16 @@
+services:
+  twiki-migration:
+    build:
+      context: .
+      dockerfile: DockerFile
+      args:
+        GIT_USER_NAME: "elchiong"
+        GIT_USER_EMAIL: "elchiong@amd.com"
+    container_name: twiki-migration-app
+    volumes:
+      - ./results:/app/results
+      - ./.env:/app/.env
+      - ./crawl_all_proj:/app/crawl_all_proj
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
