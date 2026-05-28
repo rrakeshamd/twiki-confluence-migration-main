@@ -1,4 +1,5 @@
 from confluence_api import delete_space
+from utils import clear_screen
 import json
 import os
 
@@ -13,7 +14,7 @@ def display_spaces_paginated(space_keys, migration_summary, page_size=10):
     current_page = 0
     
     while True:
-        os.system('clear')
+        clear_screen()
         
         # Calculate pagination
         total_pages = (len(filtered_spaces) + page_size - 1) // page_size if filtered_spaces else 1
@@ -29,8 +30,9 @@ def display_spaces_paginated(space_keys, migration_summary, page_size=10):
         
         # Display current page of spaces
         if filtered_spaces:
+            space_key_index = {k: i + 1 for i, k in enumerate(space_keys)}
             for i in range(start_idx, end_idx):
-                original_idx = space_keys.index(filtered_spaces[i]) + 1
+                original_idx = space_key_index.get(filtered_spaces[i], 0)
                 print(f"{original_idx}. {filtered_spaces[i]}")
         else:
             print("No spaces found matching search criteria.")
@@ -90,7 +92,7 @@ def select_and_delete_spaces(space_keys, migration_summary, migration_summary_fi
     selected_indices = set()  # Track selected spaces across all pages
 
     while True:
-        os.system('clear')
+        clear_screen()
         
         # Calculate start and end indices for current page
         start_idx = (current_page - 1) * spaces_per_page
@@ -259,7 +261,7 @@ def select_and_delete_spaces(space_keys, migration_summary, migration_summary_fi
 def manual_delete_space(migration_summary, migration_summary_file):
     """Allow user to manually input space key for deletion"""
     while True:
-        os.system('clear')
+        clear_screen()
         print(f"\n{'='*60}")
         print("Manual Space Deletion")
         print(f"{'='*60}")
@@ -382,7 +384,7 @@ def delete_confluence_spaces():
     space_keys = get_available_spaces(migration_summary)
     
     while True:
-        os.system('clear')
+        clear_screen()
         choice = main_menu()
         
         if choice == '1':

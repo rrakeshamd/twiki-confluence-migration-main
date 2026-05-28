@@ -1,8 +1,3 @@
-import sys
-
-# Increase Python's recursion limit
-sys.setrecursionlimit(5000)  # Default is 1000, increase but not too much to avoid stack overflow
-
 from langchain_openai import AzureChatOpenAI
 from langchain_core.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain.schema import HumanMessage, SystemMessage
@@ -11,6 +6,7 @@ import re
 import time
 import random
 from dotenv import load_dotenv
+from chunk_utils import chunk_markdown
 
 # Load environment variables from .env file
 load_dotenv()
@@ -24,76 +20,19 @@ headers = {
     "Ocp-Apim-Subscription-Key": os.getenv("LLM_GATEWAY_KEY"),
 }
 
+# Module-level singleton LLM client (avoid re-instantiation per call)
+_chat_client = AzureChatOpenAI(
+    azure_endpoint=url,
+    api_key="dummy",  # API key is handled via headers
+    model=model_name,
+    api_version=api_version,
+    temperature=0,
+    max_tokens=max_tokens,
+    default_headers=headers,
+)
 
-def chunk_markdown(markdown_content, max_chunk_size=3000):
-    """
-    Split markdown content into manageable chunks based on headers.
-    
-    Args:
-        markdown_content (str): The full markdown content
-        max_chunk_size (int): Maximum size of each chunk in characters
-        
-    Returns:
-        list: List of markdown chunks
-    """
-    # Same implementation as before...
-    # Split by headers (# or ## or ###)
-    header_pattern = re.compile(r'^(#{1,3})\s+', re.MULTILINE)
-    
-    # Find all header positions
-    header_matches = list(header_pattern.finditer(markdown_content))
-    
-    if not header_matches:
-        # If no headers found, just return the whole content as one chunk if it's small enough
-        if len(markdown_content) <= max_chunk_size:
-            return [markdown_content]
-        else:
-            # Or split by paragraphs
-            paragraphs = re.split(r'\n\s*\n', markdown_content)
-            chunks = []
-            current_chunk = ""
-            
-            for paragraph in paragraphs:
-                if len(current_chunk) + len(paragraph) + 2 <= max_chunk_size:
-                    current_chunk += paragraph + "\n\n"
-                else:
-                    if current_chunk:
-                        chunks.append(current_chunk.strip())
-                    current_chunk = paragraph + "\n\n"
-            
-            if current_chunk:
-                chunks.append(current_chunk.strip())
-            
-            return chunks
-    
-    # Get the start positions of each header
-    chunk_positions = [match.start() for match in header_matches]
-    chunk_positions.append(len(markdown_content))  # Add the end of the text
-    
-    chunks = []
-    for i in range(len(chunk_positions) - 1):
-        chunk = markdown_content[chunk_positions[i]:chunk_positions[i+1]]
-        
-        # Further split if chunk is too large
-        if len(chunk) > max_chunk_size:
-            # Split large chunks by paragraphs
-            paragraphs = re.split(r'\n\s*\n', chunk)
-            current_chunk = ""
-            
-            for paragraph in paragraphs:
-                if len(current_chunk) + len(paragraph) + 2 <= max_chunk_size:
-                    current_chunk += paragraph + "\n\n"
-                else:
-                    if current_chunk:
-                        chunks.append(current_chunk.strip())
-                    current_chunk = paragraph + "\n\n"
-            
-            if current_chunk:
-                chunks.append(current_chunk.strip())
-        else:
-            chunks.append(chunk)
-    
-    return chunks
+
+# chunk_markdown is imported from chunk_utils
 
 
 def process_chunk_with_retry(chat, markdown_chunk, wiki_format, max_retries=5, recursion_depth=0):
@@ -337,16 +276,8 @@ def convert_markdown_to_wiki(
     Returns:
         str: The converted content in Confluence wiki markup format
     """
-    # Initialize Azure OpenAI chat model
-    chat = AzureChatOpenAI(
-        azure_endpoint=url,
-        api_key="dummy",  # API key is handled via headers
-        model=model_name,
-        api_version=api_version,
-        temperature=0,
-        max_tokens=max_tokens,
-        default_headers=headers,
-    )
+    # Use module-level singleton LLM client
+    chat = _chat_client
 
     # Read the markdown content from file
     try:

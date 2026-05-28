@@ -67,7 +67,7 @@ def fetch_webpage(url, username, password):
     """
     
     try:
-        response = requests.get(url, auth=(username, password))
+        response = requests.get(url, auth=(username, password), timeout=30)
         if response and (response.status_code == 200 or response.status_code == 201):
             return response.content
     except requests.HTTPError as e:
@@ -249,8 +249,7 @@ def main(projects_file):
     except Exception as e:
         logging.error(f"Error initializing files: {str(e)}")
     
-    # Limit to only crawl 10 projects
-    projects_to_crawl = min(total_projects, total_projects)
+    projects_to_crawl = total_projects
     limited_projects = projects[:projects_to_crawl]
     
     logging.info(f"Starting crawl of {projects_to_crawl} projects (out of {total_projects} total)")

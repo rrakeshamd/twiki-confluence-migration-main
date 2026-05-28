@@ -1,6 +1,7 @@
 from retrieve_urls import retrieve_urls
 from migrate_twiki_projects import migrate_twiki_projects
 from delete_confluence_spaces import get_available_spaces, manual_delete_space
+from utils import clear_screen
 import os
 import json
 from datetime import datetime
@@ -212,7 +213,7 @@ def check_twiki_urls():
         # Calculate total pages for current filtered_urls
         total_pages = (len(filtered_urls) + urls_per_page - 1) // urls_per_page if filtered_urls else 1
         
-        os.system('clear')
+        clear_screen()
         
         # Calculate start and end indices for current page
         start_idx = (current_page - 1) * urls_per_page
@@ -246,16 +247,19 @@ def check_twiki_urls():
         print(f"{'#':<3} {'Project Name':<20} {'Topics':<8} {'Last Edited By':<18} {'Last Edited On':<15} {'Migration Status'}")
         print("-" * 90)
         
+        # Build O(1) index for display numbering
+        twiki_url_index = {url: i + 1 for i, url in enumerate(twiki_urls)}
+
         # Display current page of URLs
         for i, url in enumerate(filtered_urls[start_idx:end_idx], start_idx + 1):
             topic_name = extract_topic_name(url)
-            
+
             # Get project statistics
             stats = project_stats.get(topic_name, {})
             topic_count = stats.get('topic_count', 'N/A')
             last_edited_by = stats.get('last_edited_by', 'Unknown')[:17]  # Truncate for display
             last_edited_on = stats.get('last_edited_on', 'Unknown')
-            
+
             # Format last edited date
             if last_edited_on and last_edited_on != 'Unknown':
                 try:
@@ -279,8 +283,8 @@ def check_twiki_urls():
             else:
                 migration_display = "○ Not Migrated"
             
-            # Calculate original index for display
-            original_idx = twiki_urls.index(url) + 1
+            # Calculate original index for display (O(1) lookup)
+            original_idx = twiki_url_index.get(url, 0)
             
             print(f"{original_idx:<3} {topic_name[:19]:<20} {topic_count:<8} {last_edited_by:<18} {last_edited_on:<15} {migration_display}")
         
@@ -444,7 +448,7 @@ def check_twiki_urls():
                     url = twiki_urls[detail_idx]
                     topic_name = extract_topic_name(url)
                     
-                    os.system('clear')
+                    clear_screen()
                     print(f"\nProject Details - {topic_name}")
                     print("=" * 80)
                     print(f"Project Name: {topic_name}")
@@ -659,7 +663,7 @@ def start_twiki_confluence_migration():
         # Calculate total pages
         total_pages = (len(twiki_urls) + urls_per_page - 1) // urls_per_page
         
-        os.system('clear')
+        clear_screen()
         
         # Calculate start and end indices for current page
         start_idx = (current_page - 1) * urls_per_page
@@ -1486,7 +1490,7 @@ TWiki Migration Tool
             if 0 <= detail_idx < len(processed_data):
                 item = processed_data[detail_idx]
                 full_data = item['full_data']
-                os.system('clear')
+                clear_screen()
                 print(f"\nDetailed Migration Information")
                 print("=" * 100)
                 print(f"Project Name: {item['project_name']}")
@@ -1519,7 +1523,7 @@ TWiki Migration Tool
         # Calculate total pages for current filtered_data
         total_pages = (len(filtered_data) + page_size - 1) // page_size if filtered_data else 1
         
-        os.system('clear')
+        clear_screen()
         
         # Calculate start and end indices for current page
         start_idx = current_page * page_size
@@ -1804,32 +1808,32 @@ def manual_delete_confluence_spaces():
 def main():
     """Main menu loop"""
     while True:
-        os.system('clear')
+        clear_screen()
         display_menu()
         choice = get_user_choice()
         
         if choice == 1:
-            os.system('clear')
+            clear_screen()
             print("\n[INFO] Crawl all TWiki projects WebTopicList URLs...")
             get_all_twiki_urls()
 
         elif choice == 2:
-            os.system('clear')
+            clear_screen()
             print("\n[INFO] Checking available TWiki URLs...")
             check_twiki_urls()
 
         elif choice == 3:
-            os.system('clear')
+            clear_screen()
             print("\n[INFO] Starting TWiki to Confluence migration...")
             start_twiki_confluence_migration()
             
         elif choice == 4:
-            os.system('clear')
+            clear_screen()
             print("\n[INFO] Checking migration results...")
             check_migration_results()
             
         elif choice == 5:
-            os.system('clear')
+            clear_screen()
             print("\n[INFO] Manual deleting Confluence spaces...")
             manual_delete_confluence_spaces()
             

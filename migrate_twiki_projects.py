@@ -3,6 +3,8 @@ from bs4 import BeautifulSoup, NavigableString
 from dotenv import load_dotenv
 import os
 import html2text
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from confluence_api import (
     create_empty_page,
     upload_attachments,
@@ -137,7 +139,7 @@ def fetch_webpage(url, username, password):
     """
     
     try:
-        response = requests.get(url, auth=(username, password))
+        response = requests.get(url, auth=(username, password), timeout=30)
         if response and (response.status_code == 200 or response.status_code == 201):
             return response.content
     except requests.HTTPError as e:
@@ -379,7 +381,7 @@ def process_attachments_table(twiki, soup, page_name, topic_url_mapping):
             # Download the file
             file_path = os.path.join(attachments_folder, file_name)
             try:
-                response = requests.get(file_url, auth=(user.username, user.password))
+                response = requests.get(file_url, auth=(user.username, user.password), timeout=60)
                 response.raise_for_status()
                 with open(file_path, "wb") as file:
                     file.write(response.content)
@@ -430,7 +432,7 @@ def process_attachments_table(twiki, soup, page_name, topic_url_mapping):
                 # Download the file
                 file_path = os.path.join(attachments_folder, file_name)
                 try:
-                    response = requests.get(file_url, auth=(user.username, user.password))
+                    response = requests.get(file_url, auth=(user.username, user.password), timeout=60)
                     response.raise_for_status()
                     with open(file_path, "wb") as file:
                         file.write(response.content)
@@ -1167,8 +1169,8 @@ def migrate_twiki_projects(twiki_urls):
         iteration = 0
         while content is None:
             if iteration > 2:
-                priont(f"Retry more than 3 times, skipped {webTopicList_twiki.url} page...")
-                continue
+                print(f"Retry more than 3 times, skipped {webTopicList_twiki.url} page...")
+                break
             if retry_flag:
                 # pause the script for 2s
                 print("Pausing for 2 seconds before retry...")
@@ -1276,9 +1278,9 @@ def migrate_twiki_projects(twiki_urls):
                         print("\nMax retries (3 tries) exceeded for migrating WebTopicList page")
                         break
                     if retry_flag:
-                        # pause the script for 60s
-                        print("\nPausing for 60 seconds before retry...")
-                        time.sleep(60)
+                        wait = min(5 * (2 ** iteration), 120)
+                        print(f"\nPausing for {wait} seconds before retry...")
+                        time.sleep(wait)
                         retry_flag = False
                     webTopicList_dict, page_id, topic_url_mapping = migrate_twiki_page_to_confluence(
                         webTopicList_twiki, confluence_space_id, confluence_parent_id, topic_url_mapping
@@ -1347,55 +1349,61 @@ def migrate_twiki_projects(twiki_urls):
                         if iteration > 2:
                             break
                         if retry_flag:
-                            # pause the script for 60s
-                            print("\nPausing for 60 seconds before retry...")
-                            time.sleep(60)
+                            wait = min(10 * (2 ** iteration), 120)
+                            print(f"\nPausing for {wait} seconds before retry...")
+                            time.sleep(wait)
                             retry_flag = False
 
                         print(f"\n================================================")
                         print(f"============= Migration Attempt #{iteration + 1} =============")
 
-                        for i, (link, status) in enumerate(links_dict.items()):
-                            if status:
-                                continue  # Skip already migrated pages
+                        _mapping_lock = threading.Lock()
 
-                            print(f"\n{i}: {link}")
-                            currentTwiki = TWiki(url=link, base_url=base_url)
-                            currentTwiki_dict, page_id, topic_url_mapping = migrate_twiki_page_to_confluence(
-                                currentTwiki, confluence_space_id, confluence_parent_id, topic_url_mapping
+                        def _migrate_page_worker(args):
+                            link, idx = args
+                            print(f"\n{idx}: {link}")
+                            twiki_obj = TWiki(url=link, base_url=base_url)
+                            result_dict, pid, local_mapping = migrate_twiki_page_to_confluence(
+                                twiki_obj, confluence_space_id, confluence_parent_id, {}
                             )
+                            return link, twiki_obj, result_dict, pid, local_mapping
 
-                            print("\nResult:")
-                            if currentTwiki_dict is not None and page_id is not None:
-                                # Store successful migration details
-                                topic_list[page_id] = {
-                                    "parentId": currentTwiki_dict["parentId"],
-                                    "spaceId": currentTwiki_dict["spaceId"],
-                                    "parentType": currentTwiki_dict["parentType"],
-                                    "versionNumber": currentTwiki_dict["versionNumber"],
-                                    # "bodyValue": currentTwiki_dict["bodyValue"],
-                                    "bodyValueLenght": len(currentTwiki_dict["bodyValue"]),
-                                    "title": currentTwiki_dict["title"],
-                                    "pageLink": currentTwiki_dict["pageLink"],
-                                    "twikiProjectName": currentTwiki_dict["twikiProjectName"],
-                                    "twikiPageName": currentTwiki_dict["twikiPageName"],
-                                    "twikiPageURL": currentTwiki_dict["twikiPageURL"],
-                                    "twikiBaseURL": currentTwiki_dict["twikiBaseURL"],
-                                    "authorName": currentTwiki_dict["authorName"],
-                                    "authorEmail": currentTwiki_dict["authorEmail"],
-                                }
-                                topic_url_mapping[currentTwiki_dict["twikiPageURL"]] = (
-                                    currentTwiki_dict["pageLink"]
-                                )
-                                page_ids.append(page_id)
-                                page_migration_status[currentTwiki.page_name] = True
-                                print("Page Name:", currentTwiki.page_name)
-                                print("Status: Success")
-                                links_dict[link] = True  # Mark as migrated
-                            else:
-                                page_migration_status[currentTwiki.page_name] = False
-                                print("Page Name:", currentTwiki.page_name)
-                                print("Status: Fail")
+                        pending = [(link, i) for i, (link, status) in enumerate(links_dict.items()) if not status]
+
+                        with ThreadPoolExecutor(max_workers=4) as executor:
+                            futures = {executor.submit(_migrate_page_worker, args): args[0] for args in pending}
+                            for future in as_completed(futures):
+                                link, currentTwiki, currentTwiki_dict, page_id, local_mapping = future.result()
+                                print("\nResult:")
+                                if currentTwiki_dict is not None and page_id is not None:
+                                    with _mapping_lock:
+                                        topic_url_mapping.update(local_mapping)
+                                        topic_url_mapping[currentTwiki_dict["twikiPageURL"]] = currentTwiki_dict["pageLink"]
+                                    # Store successful migration details
+                                    topic_list[page_id] = {
+                                        "parentId": currentTwiki_dict["parentId"],
+                                        "spaceId": currentTwiki_dict["spaceId"],
+                                        "parentType": currentTwiki_dict["parentType"],
+                                        "versionNumber": currentTwiki_dict["versionNumber"],
+                                        "bodyValueLenght": len(currentTwiki_dict["bodyValue"]),
+                                        "title": currentTwiki_dict["title"],
+                                        "pageLink": currentTwiki_dict["pageLink"],
+                                        "twikiProjectName": currentTwiki_dict["twikiProjectName"],
+                                        "twikiPageName": currentTwiki_dict["twikiPageName"],
+                                        "twikiPageURL": currentTwiki_dict["twikiPageURL"],
+                                        "twikiBaseURL": currentTwiki_dict["twikiBaseURL"],
+                                        "authorName": currentTwiki_dict["authorName"],
+                                        "authorEmail": currentTwiki_dict["authorEmail"],
+                                    }
+                                    page_ids.append(page_id)
+                                    page_migration_status[currentTwiki.page_name] = True
+                                    print("Page Name:", currentTwiki.page_name)
+                                    print("Status: Success")
+                                    links_dict[link] = True  # Mark as migrated
+                                else:
+                                    page_migration_status[currentTwiki.page_name] = False
+                                    print("Page Name:", currentTwiki.page_name)
+                                    print("Status: Fail")
 
                         iteration += 1
                         retry_flag = True
@@ -1467,7 +1475,8 @@ def migrate_twiki_projects(twiki_urls):
                     
                     print(f"Found {len(unique_authors)} unique authors")
                     
-                    successful_admin_email_assigned = ['Elwin.Chiong@amd.com']
+                    _default_admin = os.getenv("DEFAULT_ADMIN_EMAIL", "")
+                    successful_admin_email_assigned = [_default_admin] if _default_admin else []
                     # Assign admin access to each unique author
                     for author_email, author_name in unique_authors.items():
                         try:

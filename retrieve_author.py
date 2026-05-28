@@ -2,6 +2,7 @@ from retrieve_urls import retrieve_urls
 from User import User
 from TWiki import TWiki
 import os
+import time
 from dotenv import load_dotenv
 import requests
 from bs4 import BeautifulSoup, NavigableString
@@ -63,7 +64,7 @@ def fetch_webpage(url, username, password):
     """
     
     try:
-        response = requests.get(url, auth=(username, password))
+        response = requests.get(url, auth=(username, password), timeout=30)
         if response and (response.status_code == 200 or response.status_code == 201):
             return response.content
     except requests.HTTPError as e:
@@ -128,8 +129,8 @@ if __name__ == "__main__":
         iteration = 0
         while content is None:
             if iteration > 2:
-                priont(f"Retry more than 3 times, skipped {twiki_url} page...")
-                continue
+                print(f"Retry more than 3 times, skipped {twiki_url} page...")
+                break
             if retry_flag:
                 # pause the script for 60s
                 print("Pausing for 2 seconds before retry...")

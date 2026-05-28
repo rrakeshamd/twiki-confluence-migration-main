@@ -1,9 +1,11 @@
 import requests
 import base64
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 import pandas as pd
 from bs4 import BeautifulSoup
+from utils import is_success_response, SUCCESS_CODES
 
 # Load environment variables from .env file
 load_dotenv()
@@ -25,7 +27,7 @@ def print_response_details(response):
     Args:
         response (Response): HTTP response object from requests library
     """
-    if response.status_code == 200 or response.status_code == 201 or response.status_code == 202 or response.status_code == 204:
+    if is_success_response(response.status_code):
         print(f"Response: Success with status code {response.status_code}")
     else:
         print(f"Response: Failed with status code {response.status_code}")
@@ -60,7 +62,7 @@ def create_empty_page(confluence_space_id, confluence_parent_id, page_name):
             "value": "empty page",
         },
     }
-    post_response = requests.post(post_url, json=post_payload, headers=headers)
+    post_response = requests.post(post_url, json=post_payload, headers=headers, timeout=30)
 
     # Print the response details
     print("\nTask: Creating empty page")
@@ -68,7 +70,7 @@ def create_empty_page(confluence_space_id, confluence_parent_id, page_name):
 
     page_id = ""
     version_number = ""
-    if post_response.status_code == 200 or post_response.status_code == 201:
+    if is_success_response(post_response.status_code):
         response_data = post_response.json()
         page_id = response_data.get("id")
         version_number = response_data.get("version", {}).get("number")
@@ -94,62 +96,58 @@ def upload_attachments(is_attachments, attachment_df, attachments_folder, page_i
     number_of_files = 0
     print("\nTask: Uploading attachments")
 
-    for filename in os.listdir(attachments_folder):
+    put_url = f"https://{confluence_url}/wiki/rest/api/content/{page_id}/child/attachment"
+    upload_headers = {
+        "X-Atlassian-Token": "nocheck",
+        "Authorization": f"Basic {auth_token_encoded}",
+    }
+
+    def _upload_single(filename):
         file_path = os.path.join(attachments_folder, filename)
-        if os.path.isfile(file_path):
-            try:
-                put_url = f"https://{confluence_url}/wiki/rest/api/content/{page_id}/child/attachment"
-                headers = {
-                    "X-Atlassian-Token": "nocheck",
-                    "Authorization": f"Basic {auth_token_encoded}",
+        if not os.path.isfile(file_path):
+            return None
+        try:
+            with open(file_path, "rb") as file:
+                files = {
+                    "file": (filename, file),
+                    "minorEdit": (None, "true"),
+                    "comment": (None, "Example attachment comment"),
                 }
-
-                with open(file_path, "rb") as file:
-                    files = {
-                        "file": (filename, file),
-                        "minorEdit": (None, "true"),
-                        "comment": (None, "Example attachment comment"),
-                    }
-                    put_response = requests.post(put_url, headers=headers, files=files)
-
-                print_response_details(put_response)
-
-                # Extract attachment details from response
-                if put_response.status_code in [200, 201]:
-                    put_response_data = put_response.json()
-                    attachment_id = (
-                        put_response_data["results"][0]["id"]
-                        if "results" in put_response_data
-                        and len(put_response_data["results"]) > 0
-                        else None
-                    )
-
-                    if attachment_id:
-                        base_link = put_response_data["_links"]["base"]
-                        download_link = (
-                            base_link + put_response_data["results"][0]["_links"]["download"]
-                        )
-                        attachment_data.append(
-                            {
-                                "file_name": filename,
-                                "attachment_id": attachment_id,
-                                "download_link": download_link,
-                            }
-                        )
-                        # Update topic_url_mapping if the file exists in the mapping values
-                        for url, mapped_filename in topic_url_mapping.items():
-                            if mapped_filename == filename:
-                                # Replace the original URL's value with the download link
-                                topic_url_mapping[url] = download_link
-                                break
-
-                        number_of_files += 1
-                    else:
-                        print(f"No attachment found for {filename}.")
+                put_response = requests.post(put_url, headers=upload_headers, files=files, timeout=60)
+            print_response_details(put_response)
+            if is_success_response(put_response.status_code):
+                put_response_data = put_response.json()
+                attachment_id = (
+                    put_response_data["results"][0]["id"]
+                    if "results" in put_response_data and len(put_response_data["results"]) > 0
+                    else None
+                )
+                if attachment_id:
+                    base_link = put_response_data["_links"]["base"]
+                    download_link = base_link + put_response_data["results"][0]["_links"]["download"]
+                    return {"file_name": filename, "attachment_id": attachment_id, "download_link": download_link}
                 else:
-                    print(f"Failed to upload attachment {filename}. Status code: {put_response.status_code}")
-            except Exception as e:
-                print(f"Error uploading file {filename}: {str(e)}")
+                    print(f"No attachment found for {filename}.")
+            else:
+                print(f"Failed to upload attachment {filename}. Status code: {put_response.status_code}")
+        except Exception as e:
+            print(f"Error uploading file {filename}: {str(e)}")
+        return None
+
+    filenames = os.listdir(attachments_folder)
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        results = list(executor.map(_upload_single, filenames))
+
+    # Merge results in the main thread (safe, no race conditions)
+    for result in results:
+        if result is not None:
+            attachment_data.append(result)
+            number_of_files += 1
+            # Update topic_url_mapping for this attachment
+            for url, mapped_filename in topic_url_mapping.items():
+                if mapped_filename == result["file_name"]:
+                    topic_url_mapping[url] = result["download_link"]
+                    break
 
     print("Total number of attachments: ", number_of_files)
     # Merge new attachment info with original DataFrame
@@ -270,7 +268,7 @@ def _perform_content_upload(content, representation, page_id, version_number, pa
     }
     
     try:
-        content_response = requests.put(put_url, json=put_payload, headers=headers)
+        content_response = requests.put(put_url, json=put_payload, headers=headers, timeout=30)
         
         # Print the response details
         print_response_details(content_response)
@@ -281,14 +279,14 @@ def _perform_content_upload(content, representation, page_id, version_number, pa
             print("\nTask: Setting width in draft")
             post_url = f"https://{confluence_url}/wiki/api/v2/pages/{page_id}/properties"
             post_payload = {"key": "content-appearance-draft", "value": "full-width"}
-            property_response = requests.post(post_url, json=post_payload, headers=headers)
+            property_response = requests.post(post_url, json=post_payload, headers=headers, timeout=30)
             print_response_details(property_response)
 
             # Set the width to full-width for published version
             print("\nTask: Setting width in published")
             post_url = f"https://{confluence_url}/wiki/api/v2/pages/{page_id}/properties"
             post_payload = {"key": "content-appearance-published", "value": "full-width"}
-            property_response = requests.post(post_url, json=post_payload, headers=headers)
+            property_response = requests.post(post_url, json=post_payload, headers=headers, timeout=30)
             print_response_details(property_response)
             
         return content_response
@@ -318,7 +316,7 @@ def get_page_content(page_id):
     get_url = (
         f"https://{confluence_url}/wiki/api/v2/pages/{page_id}?body-format=storage"
     )
-    response = requests.get(get_url, headers=headers)
+    response = requests.get(get_url, headers=headers, timeout=30)
 
     # Print the response details
     print_response_details(response)
@@ -346,7 +344,7 @@ def delete_page(page_id):
     }
 
     delete_url = f"https://{confluence_url}/wiki/api/v2/pages/{page_id}"
-    response = requests.delete(delete_url, headers=headers)
+    response = requests.delete(delete_url, headers=headers, timeout=30)
 
     # Print the response details
     print_response_details(response)
@@ -361,13 +359,13 @@ def delete_space(space_key):
 
     delete_url = f"https://{confluence_url}/wiki/rest/api/space/{space_key}"
 
-    response = requests.delete(delete_url, headers=headers)
+    response = requests.delete(delete_url, headers=headers, timeout=30)
 
     # Print the response details
     print("\nTask: Deleting Confluence Space")
     print_response_details(response)
 
-    if response.status_code == 200 or response.status_code == 202:
+    if is_success_response(response.status_code):
         print("Space deleted successfully!")
         return response
     else:
@@ -402,7 +400,7 @@ def create_space(space_key, space_name, space_description):
         },
     }
 
-    response = requests.post(post_url, headers=headers, json=post_payload)
+    response = requests.post(post_url, headers=headers, json=post_payload, timeout=30)
 
     # Print the response details
     print("\nTask: Creating Confluence Space")
@@ -447,10 +445,10 @@ def add_permission_to_space(space_key, key_role, target, subject_type, subject_i
         }
     }
 
-    response = requests.post(post_url, headers=headers, json=post_payload)
+    response = requests.post(post_url, headers=headers, json=post_payload, timeout=30)
 
     # print(f"Status code: {response.status_code}")
-    if response.status_code in (200, 201):
+    if is_success_response(response.status_code):
         # print(f"Adding permission > {key_role} on {target} for {subject_type} {subject_identifier}: Success")
         return True
     else:
@@ -524,7 +522,7 @@ def get_space_by_id(space_id):
     }
 
     get_url = f"https://{confluence_url}/wiki/api/v2/spaces/{space_id}"
-    response = requests.get(get_url, headers=headers)
+    response = requests.get(get_url, headers=headers, timeout=30)
 
     # Print the response details
     print_response_details(response)
@@ -550,7 +548,7 @@ def get_accountId_by_email(emailAddress):
     }
 
     get_url = "https://amd-sandbox-20250612-uat.atlassian.net/rest/api/3/user/search"
-    response = requests.get(get_url, headers=headers, params=params)
+    response = requests.get(get_url, headers=headers, params=params, timeout=30)
 
     # Print the response details
     print_response_details(response)

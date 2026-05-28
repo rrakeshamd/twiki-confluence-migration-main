@@ -1,5 +1,6 @@
 import os
 import sys
+from utils import clear_screen
 
 # Add the crawl_all_proj directory to the path so we can import modules from it
 sys.path.append(os.path.join(os.path.dirname(__file__), 'crawl_all_proj'))
@@ -184,16 +185,16 @@ def get_project_statistics():
 def get_all_twiki_urls():
     """Main function to run the TWiki URLs discovery tool"""
     while True:
-        os.system('clear')
+        clear_screen()
         display_menu()
         choice = get_user_choice()
         
         if choice == 1:
-            os.system('clear')
+            clear_screen()
             get_all_project_names()
             
         elif choice == 2:
-            os.system('clear')
+            clear_screen()
             get_project_statistics()
             
         elif choice == 'q':

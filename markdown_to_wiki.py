@@ -16,6 +16,27 @@ headers = {
     "Ocp-Apim-Subscription-Key": os.getenv("LLM_GATEWAY_KEY"),
 }
 
+# Module-level singleton for the LLM client (avoid re-instantiation per call)
+_chat_client = AzureChatOpenAI(
+    azure_endpoint=url,
+    api_key="dummy",  # API key is handled via headers
+    model=model_name,
+    api_version=api_version,
+    temperature=0,
+    max_tokens=max_tokens,
+    default_headers=headers,
+)
+
+# Module-level cache for the Confluence wiki format guide
+_wiki_format_cache = None
+
+def _get_wiki_format():
+    global _wiki_format_cache
+    if _wiki_format_cache is None:
+        with open(os.path.join(os.getcwd(), "confluence_wiki_format.txt"), "r", encoding="utf-8") as f:
+            _wiki_format_cache = f.read()
+    return _wiki_format_cache
+
 def print_response_details(response):
     """
     Check if the response is successful.
@@ -76,31 +97,16 @@ def convert_markdown_to_wiki(
     Returns:
         str: The converted content in Confluence wiki markup format
     """
-    # Initialize Azure OpenAI chat model
-    chat = AzureChatOpenAI(
-        azure_endpoint=url,
-        api_key="dummy",  # API key is handled via headers
-        model=model_name,
-        api_version=api_version,
-        temperature=0,
-        max_tokens=max_tokens,
-        default_headers=headers,
-        # Enable these for debugging
-        # streaming=True,
-        # callbacks=[StreamingStdOutCallbackHandler()]
-    )
+    # Use module-level singleton LLM client
+    chat = _chat_client
 
     # Read the markdown content from file
     markdown_content = ""
     with open(markdown_file_path, "r", encoding="utf-8") as file:
         markdown_content = file.read()
 
-    # Read the Confluence wiki format guide from file
-    wiki_format = ""
-    with open(
-        os.path.join(os.getcwd(), "confluence_wiki_format.txt"), "r", encoding="utf-8"
-    ) as file:
-        wiki_format = file.read()
+    # Read the Confluence wiki format guide (cached after first call)
+    wiki_format = _get_wiki_format()
 
     # Define system message with conversion instructions
     system_message = """You are an expert markdown to Confluence Wiki Markup converter. Your task is to precisely transform markdown content into Confluence Wiki Markup syntax, ensuring:
