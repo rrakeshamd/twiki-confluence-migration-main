@@ -1,169 +1,292 @@
-# TWiki to Confluence Migration
+# TWiki to Confluence Migration Tool
 
-A comprehensive toolkit to migrate content from TWiki to Atlassian Confluence. Handles page fetching, HTML-to-Markdown conversion, LLM-powered wiki markup generation, attachment uploads, permission assignment, and link rewriting.
-
----
-
-## Features
-
-- **Full page migration** — fetches TWiki pages, converts them to Confluence Wiki Markup via Azure OpenAI (GPT-4o), and uploads to Confluence
-- **Attachment handling** — downloads and uploads file attachments; rewrites in-page links automatically
-- **Parallel processing** — page migration and attachment uploads run concurrently for 5–10× speedup
-- **Author & permission management** — retrieves TWiki authors and assigns Confluence space permissions
-- **Project discovery** — crawls all TWiki projects to build a migration list
-- **Interactive CLI** — menu-driven interface to start migrations, filter/search projects, and view results
-- **Error analysis** — uses an LLM to analyze migration logs and summarize failures
-- **Space cleanup** — safely delete migrated Confluence spaces with confirmation prompts
+A Python-based tool that automates the end-to-end migration of TWiki project spaces to Atlassian Confluence. It handles content extraction, format conversion (HTML → Markdown → Confluence Wiki markup), attachment uploads, internal link rewriting, and admin permission assignment.
 
 ---
 
-## Architecture
+## Table of Contents
 
-```
-main.py                        # Interactive CLI entry point
-migrate_twiki_projects.py      # Core migration orchestration (parallel)
-confluence_api.py              # Confluence REST API wrapper (v1 & v2)
-markdown_to_wiki.py            # Azure OpenAI Markdown → Confluence Wiki Markup
-retrieve_author.py             # TWiki author extraction
-retrieve_urls.py               # URL list loader
-modify_space_home_content.py   # Space home page template generation
-analyze_error_from_log.py      # LLM-based log error analysis
-delete_confluence_spaces.py    # Interactive space deletion utility
-get_all_twiki_urls.py          # TWiki URL discovery
-utils.py                       # Shared utilities (fetch, backoff, clear_screen)
-crawl_all_proj/
-  crawl_all_projects.py        # Concurrent project crawler
-  get_all_projects_name.py     # Project name extractor
-test/
-  markdown_to_wiki/
-    chunk_utils.py             # Shared markdown chunking logic
-    markdown_to_wiki2.py       # Azure OpenAI chunked converter
-    markdown_to_wiki_gemini.py # Gemini LLM chunked converter
-```
+- [Prerequisites](#prerequisites)
+- [Configuration](#configuration)
+- [Running the Application](#running-the-application)
+  - [Option A: Local (Python)](#option-a-local-python)
+  - [Option B: Docker (Recommended)](#option-b-docker-recommended)
+- [Migration Steps](#migration-steps)
+- [Understanding the Output](#understanding-the-output)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
-## Setup
+## Prerequisites
 
-### 1. Clone the repository
+- Python 3.9+ (for local setup)
+- Docker & Docker Compose (for containerized setup)
+- Network access to both TWiki and Confluence instances
+- TWiki credentials (username + password)
+- Confluence API token ([generate one here](https://id.atlassian.com/manage-profile/security/api-tokens))
 
-```sh
-git clone https://github.com/your-repo/twiki-confluence-migration.git
-cd twiki-confluence-migration
-```
+---
 
-### 2. Install dependencies
+## Configuration
 
-```sh
-pip install -r requirements.txt
-```
-
-### 3. Configure environment variables
-
-Create a `.env` file in the root directory:
+Create a `.env` file in the project root before running the tool. The file must **not** be committed to version control.
 
 ```env
-# TWiki credentials
-USERNAME=your_twiki_username
-PASSWORD=your_twiki_password
-BASE_URL=https://your-twiki-instance.com
+# ─── TWiki ───────────────────────────────────────────────────────────────────
+USERNAME=<your_twiki_username>
+PASSWORD=<your_twiki_password>
+BASE_URL=https://twiki.example.com
 
-# Confluence credentials
-CONFLUENCE_URL=your_confluence_url
-CONFLUENCE_USERNAME=your_confluence_username
-CONFLUENCE_API_TOKEN=your_confluence_api_token
-CONFLUENCE_SPACE_ID=your_confluence_space_id
-CONFLUENCE_PARENT_ID=your_confluence_parent_id
+# ─── Confluence ──────────────────────────────────────────────────────────────
+CONFLUENCE_URL=<your-domain>.atlassian.net
+CONFLUENCE_USERNAME=<your_confluence_email>
+CONFLUENCE_API_TOKEN=<your_confluence_api_token>
 
-# Azure OpenAI / LLM gateway
-LLM_GATEWAY_KEY=your_llm_gateway_key
-
-# Optional: default admin email to assign space admin permissions
+# ─── Space Admin (Optional) ──────────────────────────────────────────────────
+# Fallback admin assigned to every migrated space
 DEFAULT_ADMIN_EMAIL=admin@example.com
 
-# Git (used in Docker setup)
-GIT_USER_NAME=your_git_username
-GIT_USER_EMAIL=your_git_email
+# ─── Email / SMTP (Optional — required only for Excel report emailing) ────────
+smtp_server=mail.example.com
+smtp_port=25
+sender_email=migration-tool@example.com
+default_recipients=team@example.com,manager@example.com
 ```
 
 ---
 
-## Usage
+## Running the Application
 
-### Run the interactive migration CLI
+### Option A: Local (Python)
 
-```sh
-python3 main.py
+```bash
+# 1. Enter the project directory
+cd twiki-confluence-migration-main
+
+# 2. Create the .env file (see Configuration above)
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Launch the tool
+python main.py
 ```
 
-The CLI menu provides:
+### Option B: Docker (Recommended)
 
-| Option | Description |
+Docker provides an isolated, reproducible environment and is the preferred way to run long migrations.
+
+```bash
+# 1. Create the .env file (see Configuration above)
+
+# 2. Build and start the container in the background
+docker-compose up -d
+
+# 3. Attach to the running migration session
+docker exec -it twiki-migration-app tmux attach-session -t migration-session
+
+# 4. Inside the tmux session, launch the tool
+python main.py
+
+# ── Detach from tmux without stopping the session ──
+# Press Ctrl+B, then D
+
+# 5. Re-attach at any time
+docker exec -it twiki-migration-app tmux attach-session -t migration-session
+
+# 6. Stop the container when done
+docker-compose down
+```
+
+**Volume mounts** (data persists on the host):
+
+| Host path          | Container path          | Purpose                           |
+|--------------------|-------------------------|-----------------------------------|
+| `./results`        | `/app/results`          | Migration logs and JSON output    |
+| `./.env`           | `/app/.env`             | Configuration file                |
+| `./crawl_all_proj` | `/app/crawl_all_proj`   | Project metadata (topic counts)   |
+
+---
+
+## Migration Steps
+
+After running `python main.py` you will see the main menu:
+
+```
+==================================================
+   TWiki to Confluence Migration Tool
+==================================================
+1. Get all TWiki URLs
+2. Check available TWiki URLs
+3. Migrate TWiki projects
+4. Check migration results
+5. Manual delete Confluence spaces
+q. Exit
+==================================================
+```
+
+Follow these steps in order for a complete migration:
+
+---
+
+### Step 1 — Discover TWiki projects (Option 1)
+
+Select **1** to crawl all TWiki `WebTopicList` pages and build the project list.
+
+- Writes discovered project URLs to `twiki_urls.txt`
+- Also generates `crawl_all_proj/project_topics_count.csv` with topic counts and last-edited metadata
+
+> Run this step once before any migration. Re-run it if new projects are added to TWiki.
+
+---
+
+### Step 2 — Review available projects (Option 2)
+
+Select **2** to browse the discovered projects in a paginated table showing:
+
+| Column | Description |
 |--------|-------------|
-| 1 | Retrieve all TWiki URLs |
-| 2 | Browse / search available projects |
-| 3 | Start migration to Confluence |
-| 4 | View migration results |
-| 5 | Delete Confluence spaces |
-| 6 | Analyze migration log errors |
+| Project Name | TWiki project identifier |
+| Topics | Number of pages in the project |
+| Last Edited By | Most recent author |
+| Last Edited On | Date of last edit |
+| Migration Status | Not Migrated / Migrated / Deleted / Failed |
 
-### Crawl all TWiki projects
+**Navigation commands:**
 
-```sh
-cd crawl_all_proj
-python3 crawl_all_projects.py
-```
-
-Outputs `../twiki_urls.txt` with all discovered project URLs, and `project_topics_count.csv` with topic counts and last-edit metadata.
-
----
-
-## Docker Setup
-
-```sh
-docker-compose up --build
-```
-
-Then connect to the running container's tmux session:
-
-```sh
-docker exec -it twiki-migration tmux attach -t migration-session
-```
-
-Inside tmux, run:
-
-```sh
-python3 main.py
-```
+| Key | Action |
+|-----|--------|
+| `n` / `p` | Next / previous page |
+| `s` | Search by project name |
+| `f` | Filter by migration status |
+| `v` | View full project details |
+| `q` | Return to main menu |
 
 ---
 
-## Performance
+### Step 3 — Migrate projects (Option 3)
 
-The migration pipeline is optimized for speed and reliability:
+Select **3** to open the migration selection screen.
 
-| Optimization | Detail |
-|---|---|
-| Parallel page migration | `ThreadPoolExecutor(max_workers=4)` — pages migrated concurrently |
-| Parallel attachment uploads | `ThreadPoolExecutor(max_workers=5)` — files uploaded concurrently |
-| HTTP connection pooling | `requests.Session` reused across calls |
-| Request timeouts | 30 s for API calls, 60 s for file downloads |
-| Exponential backoff | Replaces fixed 60 s sleeps on retries |
-| LLM client singleton | `AzureChatOpenAI` instantiated once at module load |
-| Wiki format caching | `confluence_wiki_format.txt` read once and cached |
+1. **Select projects** — enter project numbers (e.g. `1,3,5`), or press `a` to select all
+2. Press `s` to review your selection
+3. Press `m` to confirm, then type `start` at the prompt to begin
+
+The tool automatically runs a 5-phase migration for each selected project:
+
+| Phase | What happens |
+|-------|-------------|
+| **1 — Create space & migrate WebTopicList** | Creates a new Confluence space and uploads the index page |
+| **2 — Parallel page migration** | Migrates all pages concurrently (4 workers, up to 3 retries per page) |
+| **3 — Rewrite internal links** | Replaces all TWiki URLs with Confluence URLs; marks broken links as `DEPRECATED!!` |
+| **4 — Assign admins** | Grants admin permissions in Confluence to all page authors |
+| **5 — Save results & clean up** | Writes logs and JSON summary; removes temporary local files |
+
+Progress is printed to the terminal in real time. For Docker users, the tmux session keeps the migration running even if you detach.
 
 ---
 
-## Key Files
+### Step 4 — Check results (Option 4)
 
-| File | Purpose |
-|---|---|
-| `utils.py` | Shared: `fetch_webpage`, `is_success_response`, `exponential_backoff`, `clear_screen` |
-| `test/markdown_to_wiki/chunk_utils.py` | Shared `chunk_markdown` used by both LLM converters |
-| `confluence_wiki_format.txt` | Reference guide fed to the LLM for markup conversion |
-| `defaultHomePage.html` | Template for Confluence space home pages |
-| `twiki_urls.txt` | Input URL list for migration |
-| `results/` | Migration outputs: JSON summaries, logs, per-project HTML |
+Select **4** to view a paginated results table with:
+
+- Migration ratio (pages migrated / total pages)
+- Success percentage
+- Status: Migrated / Partial Success / Failed / Deleted
+- Latest migration date
+
+**Actions available in this view:**
+
+| Key | Action |
+|-----|--------|
+| `v` | View full details + error analysis for a project |
+| `d` | Delete spaces by project number (enables re-migration) |
+| `dd` | Delete a space by manually entering its space key |
+| `r` | Re-migrate previously deleted spaces |
+| `e` | Export results to Excel (optionally email the report) |
+| `f` | Filter by status |
+| `s` | Search by project name |
+
+---
+
+### Step 5 — Delete spaces for re-migration (Option 5)
+
+Select **5** if you need to manually delete a Confluence space outside of the results view. Spaces can also be deleted from within Option 4 using the `d` or `dd` keys.
+
+After deletion, the space status is set to **Deleted** in `migration_summary.json`, making it available for re-migration via Option 3 or the `r` key in Option 4.
+
+---
+
+## Understanding the Output
+
+All output is written to the `results/` directory (mounted to the host when using Docker):
+
+```
+results/
+├── migration_summary.json                     # Cumulative summary of all migrations
+├── <ProjectName>/
+│   ├── migration_log.txt                      # Detailed per-page log for the project
+│   └── results.json                           # Page-level metadata
+└── migration_results_YYYYMMDD_HHMMSS.xlsx     # Excel export (generated on demand)
+```
+
+**`migration_summary.json` structure (per project):**
+
+```json
+{
+  "SPACEKEY": {
+    "2024-01-15T10:30:00": {
+      "version": 1,
+      "project_name": "MyProject",
+      "old_twiki_url": "https://twiki.example.com/view/MyProject/WebTopicList",
+      "new_confluence_link": "https://your-domain.atlassian.net/wiki/spaces/SPACEKEY",
+      "admin_list": ["user@example.com"],
+      "success_migrated/total_pages": "48/50",
+      "percentage_migration": 96.0,
+      "status": "Partial Success",
+      "message": "..."
+    }
+  }
+}
+```
+
+**Status values:**
+
+| Status | Meaning |
+|--------|---------|
+| `Success` | All pages migrated successfully |
+| `Partial Success` | Some pages migrated (check ratio for details) |
+| `Fail` | Space creation failed or critical error occurred |
+| `Deleted` | Space has been deleted from Confluence |
+
+---
+
+## Troubleshooting
+
+**Authentication errors (TWiki)**
+- Verify `USERNAME`, `PASSWORD`, and `BASE_URL` in `.env`
+- Confirm the account has read access to the TWiki projects
+
+**Authentication errors (Confluence)**
+- Verify `CONFLUENCE_USERNAME` is your full email address
+- Regenerate `CONFLUENCE_API_TOKEN` at `id.atlassian.com` and update `.env`
+- Confirm the account has Space Creator permissions in Confluence
+
+**Pages failing to migrate**
+- The tool retries each page up to 3 times with exponential backoff
+- Failed pages are recorded in `migration_log.txt` and `results.json`
+- Delete the space (Option 4 → `d`) and re-migrate once the underlying issue is resolved
+
+**`twiki_urls.txt` is empty**
+- Run Option 1 first to crawl and populate the project list
+
+**Docker container exits immediately**
+- Ensure `.env` exists in the project root before running `docker-compose up`
+- Check logs with: `docker logs twiki-migration-app`
+
+**Excel export fails**
+- Ensure `pandas` and `openpyxl` are installed: `pip install pandas openpyxl`
+- These are included in `requirements.txt` and should be present in the Docker image
 
 ---
 

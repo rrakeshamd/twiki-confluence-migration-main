@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TWiki to Confluence Migration Tool</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 16px;
+      line-height: 1.7;
+      color: #24292f;
+      background: #ffffff;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 4rem;
+    }
+    h1, h2, h3, h4 { font-weight: 600; margin-top: 1.8em; margin-bottom: 0.5em; line-height: 1.3; }
+    h1 { font-size: 2em; border-bottom: 2px solid #e1e4e8; padding-bottom: 0.4em; }
+    h2 { font-size: 1.4em; border-bottom: 1px solid #e1e4e8; padding-bottom: 0.3em; }
+    h3 { font-size: 1.15em; }
+    h4 { font-size: 1em; }
+    p { margin: 0.6em 0 1em; }
+    a { color: #0969da; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 0.875em;
+      background: #f6f8fa;
+      border: 1px solid #d0d7de;
+      border-radius: 4px;
+      padding: 0.15em 0.4em;
+    }
+    pre {
+      background: #f6f8fa;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      padding: 1.1em 1.3em;
+      overflow-x: auto;
+      margin: 1em 0;
+    }
+    pre code {
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 0.85em;
+      color: #24292f;
+    }
+    blockquote {
+      margin: 1em 0;
+      padding: 0.5em 1em;
+      border-left: 4px solid #0969da;
+      background: #f0f6ff;
+      border-radius: 0 4px 4px 0;
+      color: #444d56;
+    }
+    blockquote p { margin: 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1.2em 0;
+      font-size: 0.93em;
+    }
+    th, td {
+      border: 1px solid #d0d7de;
+      padding: 0.5em 0.85em;
+      text-align: left;
+    }
+    th {
+      background: #f6f8fa;
+      font-weight: 600;
+    }
+    tr:nth-child(even) td { background: #fafbfc; }
+    ul, ol { padding-left: 1.8em; margin: 0.4em 0 1em; }
+    li { margin: 0.25em 0; }
+    hr {
+      border: none;
+      border-top: 1px solid #e1e4e8;
+      margin: 2em 0;
+    }
+    strong { font-weight: 600; }
+  </style>
+</head>
+<body>
+<h1 id="twiki-to-confluence-migration-tool">TWiki to Confluence Migration Tool</h1>
+
+<p>A Python-based tool that automates the end-to-end migration of TWiki project spaces to Atlassian Confluence. It handles content extraction, format conversion (HTML → Markdown → Confluence Wiki markup), attachment uploads, internal link rewriting, and admin permission assignment.</p>
+
+<hr>
+
+<h2 id="table-of-contents">Table of Contents</h2>
+
+<ul>
+<li><a href="#prerequisites">Prerequisites</a></li>
+<li><a href="#configuration">Configuration</a></li>
+<li><a href="#running-the-application">Running the Application</a></li>
+<li><a href="#option-a-local-python">Option A: Local (Python)</a></li>
+<li><a href="#option-b-docker-recommended">Option B: Docker (Recommended)</a></li>
+<li><a href="#migration-steps">Migration Steps</a></li>
+<li><a href="#understanding-the-output">Understanding the Output</a></li>
+<li><a href="#troubleshooting">Troubleshooting</a></li>
+</ul>
+
+<hr>
+
+<h2 id="prerequisites">Prerequisites</h2>
+
+<ul>
+<li>Python 3.9+ (for local setup)</li>
+<li>Docker & Docker Compose (for containerized setup)</li>
+<li>Network access to both TWiki and Confluence instances</li>
+<li>TWiki credentials (username + password)</li>
+<li>Confluence API token (<a href="https://id.atlassian.com/manage-profile/security/api-tokens">generate one here</a>)</li>
+</ul>
+
+<hr>
+
+<h2 id="configuration">Configuration</h2>
+
+<p>Create a <code>.env</code> file in the project root before running the tool. The file must <strong>not</strong> be committed to version control.</p>
+
+<pre><code class="language-env"># ─── TWiki ───────────────────────────────────────────────────────────────────
+USERNAME=&lt;your_twiki_username&gt;
+PASSWORD=&lt;your_twiki_password&gt;
+BASE_URL=https://twiki.example.com
+
+# ─── Confluence ──────────────────────────────────────────────────────────────
+CONFLUENCE_URL=&lt;your-domain&gt;.atlassian.net
+CONFLUENCE_USERNAME=&lt;your_confluence_email&gt;
+CONFLUENCE_API_TOKEN=&lt;your_confluence_api_token&gt;
+
+# ─── Space Admin (Optional) ──────────────────────────────────────────────────
+# Fallback admin assigned to every migrated space
+DEFAULT_ADMIN_EMAIL=admin@example.com
+
+# ─── Email / SMTP (Optional — required only for Excel report emailing) ────────
+smtp_server=mail.example.com
+smtp_port=25
+sender_email=migration-tool@example.com
+default_recipients=team@example.com,manager@example.com</code></pre>
+
+<hr>
+
+<h2 id="running-the-application">Running the Application</h2>
+
+<h3 id="option-a-local-python">Option A: Local (Python)</h3>
+
+<pre><code class="language-bash"># 1. Enter the project directory
+cd twiki-confluence-migration-main
+
+# 2. Create the .env file (see Configuration above)
+
+# 3. Install dependencies
+pip install -r requirements.txt
+
+# 4. Launch the tool
+python main.py</code></pre>
+
+<h3 id="option-b-docker-recommended">Option B: Docker (Recommended)</h3>
+
+<p>Docker provides an isolated, reproducible environment and is the preferred way to run long migrations.</p>
+
+<pre><code class="language-bash"># 1. Create the .env file (see Configuration above)
+
+# 2. Build and start the container in the background
+docker-compose up -d
+
+# 3. Attach to the running migration session
+docker exec -it twiki-migration-app tmux attach-session -t migration-session
+
+# 4. Inside the tmux session, launch the tool
+python main.py
+
+# ── Detach from tmux without stopping the session ──
+# Press Ctrl+B, then D
+
+# 5. Re-attach at any time
+docker exec -it twiki-migration-app tmux attach-session -t migration-session
+
+# 6. Stop the container when done
+docker-compose down</code></pre>
+
+<p><strong>Volume mounts</strong> (data persists on the host):</p>
+
+<table>
+  <tr><th>Host path</th><th>Container path</th><th>Purpose</th></tr>
+  <tr><td><code>./results</code></td><td><code>/app/results</code></td><td>Migration logs and JSON output</td></tr>
+  <tr><td><code>./.env</code></td><td><code>/app/.env</code></td><td>Configuration file</td></tr>
+  <tr><td><code>./crawl_all_proj</code></td><td><code>/app/crawl_all_proj</code></td><td>Project metadata (topic counts)</td></tr>
+</table>
+
+<hr>
+
+<h2 id="migration-steps">Migration Steps</h2>
+
+<p>After running <code>python main.py</code> you will see the main menu:</p>
+
+<pre><code>==================================================
+   TWiki to Confluence Migration Tool
+==================================================
+1. Get all TWiki URLs
+2. Check available TWiki URLs
+3. Migrate TWiki projects
+4. Check migration results
+5. Manual delete Confluence spaces
+q. Exit
+==================================================</code></pre>
+
+<p>Follow these steps in order for a complete migration:</p>
+
+<hr>
+
+<h3 id="step-1--discover-twiki-projects-option-1">Step 1 — Discover TWiki projects (Option 1)</h3>
+
+<p>Select <strong>1</strong> to crawl all TWiki <code>WebTopicList</code> pages and build the project list.</p>
+
+<ul>
+<li>Writes discovered project URLs to <code>twiki_urls.txt</code></li>
+<li>Also generates <code>crawl_all_proj/project_topics_count.csv</code> with topic counts and last-edited metadata</li>
+</ul>
+
+<blockquote><p>Run this step once before any migration. Re-run it if new projects are added to TWiki.</p></blockquote>
+
+<hr>
+
+<h3 id="step-2--review-available-projects-option-2">Step 2 — Review available projects (Option 2)</h3>
+
+<p>Select <strong>2</strong> to browse the discovered projects in a paginated table showing:</p>
+
+<table>
+  <tr><th>Column</th><th>Description</th></tr>
+  <tr><td>Project Name</td><td>TWiki project identifier</td></tr>
+  <tr><td>Topics</td><td>Number of pages in the project</td></tr>
+  <tr><td>Last Edited By</td><td>Most recent author</td></tr>
+  <tr><td>Last Edited On</td><td>Date of last edit</td></tr>
+  <tr><td>Migration Status</td><td>Not Migrated / Migrated / Deleted / Failed</td></tr>
+</table>
+
+<p><strong>Navigation commands:</strong></p>
+
+<table>
+  <tr><th>Key</th><th>Action</th></tr>
+  <tr><td><code>n</code> / <code>p</code></td><td>Next / previous page</td></tr>
+  <tr><td><code>s</code></td><td>Search by project name</td></tr>
+  <tr><td><code>f</code></td><td>Filter by migration status</td></tr>
+  <tr><td><code>v</code></td><td>View full project details</td></tr>
+  <tr><td><code>q</code></td><td>Return to main menu</td></tr>
+</table>
+
+<hr>
+
+<h3 id="step-3--migrate-projects-option-3">Step 3 — Migrate projects (Option 3)</h3>
+
+<p>Select <strong>3</strong> to open the migration selection screen.</p>
+
+<ol>
+<li><strong>Select projects</strong> — enter project numbers (e.g. <code>1,3,5</code>), or press <code>a</code> to select all</li>
+<li>Press <code>s</code> to review your selection</li>
+<li>Press <code>m</code> to confirm, then type <code>start</code> at the prompt to begin</li>
+</ol>
+
+<p>The tool automatically runs a 5-phase migration for each selected project:</p>
+
+<table>
+  <tr><th>Phase</th><th>What happens</th></tr>
+  <tr><td><strong>1 — Create space & migrate WebTopicList</strong></td><td>Creates a new Confluence space and uploads the index page</td></tr>
+  <tr><td><strong>2 — Parallel page migration</strong></td><td>Migrates all pages concurrently (4 workers, up to 3 retries per page)</td></tr>
+  <tr><td><strong>3 — Rewrite internal links</strong></td><td>Replaces all TWiki URLs with Confluence URLs; marks broken links as <code>DEPRECATED!!</code></td></tr>
+  <tr><td><strong>4 — Assign admins</strong></td><td>Grants admin permissions in Confluence to all page authors</td></tr>
+  <tr><td><strong>5 — Save results & clean up</strong></td><td>Writes logs and JSON summary; removes temporary local files</td></tr>
+</table>
+
+<p>Progress is printed to the terminal in real time. For Docker users, the tmux session keeps the migration running even if you detach.</p>
+
+<hr>
+
+<h3 id="step-4--check-results-option-4">Step 4 — Check results (Option 4)</h3>
+
+<p>Select <strong>4</strong> to view a paginated results table with:</p>
+
+<ul>
+<li>Migration ratio (pages migrated / total pages)</li>
+<li>Success percentage</li>
+<li>Status: Migrated / Partial Success / Failed / Deleted</li>
+<li>Latest migration date</li>
+</ul>
+
+<p><strong>Actions available in this view:</strong></p>
+
+<table>
+  <tr><th>Key</th><th>Action</th></tr>
+  <tr><td><code>v</code></td><td>View full details + error analysis for a project</td></tr>
+  <tr><td><code>d</code></td><td>Delete spaces by project number (enables re-migration)</td></tr>
+  <tr><td><code>dd</code></td><td>Delete a space by manually entering its space key</td></tr>
+  <tr><td><code>r</code></td><td>Re-migrate previously deleted spaces</td></tr>
+  <tr><td><code>e</code></td><td>Export results to Excel (optionally email the report)</td></tr>
+  <tr><td><code>f</code></td><td>Filter by status</td></tr>
+  <tr><td><code>s</code></td><td>Search by project name</td></tr>
+</table>
+
+<hr>
+
+<h3 id="step-5--delete-spaces-for-re-migration-option-5">Step 5 — Delete spaces for re-migration (Option 5)</h3>
+
+<p>Select <strong>5</strong> if you need to manually delete a Confluence space outside of the results view. Spaces can also be deleted from within Option 4 using the <code>d</code> or <code>dd</code> keys.</p>
+
+<p>After deletion, the space status is set to <strong>Deleted</strong> in <code>migration_summary.json</code>, making it available for re-migration via Option 3 or the <code>r</code> key in Option 4.</p>
+
+<hr>
+
+<h2 id="understanding-the-output">Understanding the Output</h2>
+
+<p>All output is written to the <code>results/</code> directory (mounted to the host when using Docker):</p>
+
+<pre><code>results/
+├── migration_summary.json                     # Cumulative summary of all migrations
+├── &lt;ProjectName&gt;/
+│   ├── migration_log.txt                      # Detailed per-page log for the project
+│   └── results.json                           # Page-level metadata
+└── migration_results_YYYYMMDD_HHMMSS.xlsx     # Excel export (generated on demand)</code></pre>
+
+<p><strong><code>migration_summary.json</code> structure (per project):</strong></p>
+
+<pre><code class="language-json">{
+  &quot;SPACEKEY&quot;: {
+    &quot;2024-01-15T10:30:00&quot;: {
+      &quot;version&quot;: 1,
+      &quot;project_name&quot;: &quot;MyProject&quot;,
+      &quot;old_twiki_url&quot;: &quot;https://twiki.example.com/view/MyProject/WebTopicList&quot;,
+      &quot;new_confluence_link&quot;: &quot;https://your-domain.atlassian.net/wiki/spaces/SPACEKEY&quot;,
+      &quot;admin_list&quot;: [&quot;user@example.com&quot;],
+      &quot;success_migrated/total_pages&quot;: &quot;48/50&quot;,
+      &quot;percentage_migration&quot;: 96.0,
+      &quot;status&quot;: &quot;Partial Success&quot;,
+      &quot;message&quot;: &quot;...&quot;
+    }
+  }
+}</code></pre>
+
+<p><strong>Status values:</strong></p>
+
+<table>
+  <tr><th>Status</th><th>Meaning</th></tr>
+  <tr><td><code>Success</code></td><td>All pages migrated successfully</td></tr>
+  <tr><td><code>Partial Success</code></td><td>Some pages migrated (check ratio for details)</td></tr>
+  <tr><td><code>Fail</code></td><td>Space creation failed or critical error occurred</td></tr>
+  <tr><td><code>Deleted</code></td><td>Space has been deleted from Confluence</td></tr>
+</table>
+
+<hr>
+
+<h2 id="troubleshooting">Troubleshooting</h2>
+
+<p><strong>Authentication errors (TWiki)</strong></p>
+<ul>
+<li>Verify <code>USERNAME</code>, <code>PASSWORD</code>, and <code>BASE_URL</code> in <code>.env</code></li>
+<li>Confirm the account has read access to the TWiki projects</li>
+</ul>
+
+<p><strong>Authentication errors (Confluence)</strong></p>
+<ul>
+<li>Verify <code>CONFLUENCE_USERNAME</code> is your full email address</li>
+<li>Regenerate <code>CONFLUENCE_API_TOKEN</code> at <code>id.atlassian.com</code> and update <code>.env</code></li>
+<li>Confirm the account has Space Creator permissions in Confluence</li>
+</ul>
+
+<p><strong>Pages failing to migrate</strong></p>
+<ul>
+<li>The tool retries each page up to 3 times with exponential backoff</li>
+<li>Failed pages are recorded in <code>migration_log.txt</code> and <code>results.json</code></li>
+<li>Delete the space (Option 4 → <code>d</code>) and re-migrate once the underlying issue is resolved</li>
+</ul>
+
+<p><strong><code>twiki_urls.txt</code> is empty</strong></p>
+<ul>
+<li>Run Option 1 first to crawl and populate the project list</li>
+</ul>
+
+<p><strong>Docker container exits immediately</strong></p>
+<ul>
+<li>Ensure <code>.env</code> exists in the project root before running <code>docker-compose up</code></li>
+<li>Check logs with: <code>docker logs twiki-migration-app</code></li>
+</ul>
+
+<p><strong>Excel export fails</strong></p>
+<ul>
+<li>Ensure <code>pandas</code> and <code>openpyxl</code> are installed: <code>pip install pandas openpyxl</code></li>
+<li>These are included in <code>requirements.txt</code> and should be present in the Docker image</li>
+</ul>
+
+<hr>
+
+<h2 id="license">License</h2>
+
+<p>This project is licensed under the MIT License. See the <a href="LICENSE">LICENSE</a> file for details.</p>
+
+</body>
+</html>

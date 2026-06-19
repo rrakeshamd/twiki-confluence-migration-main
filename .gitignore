@@ -188,6 +188,7 @@ cython_debug/
 *.ppt
 
 !README.md
+!README.html
 !confluence_wiki_format.txt
 !confluence_storage_format.txt
 !defaultHomePage.html
