@@ -1,11 +1,13 @@
 import requests
 import base64
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 import pandas as pd
 from bs4 import BeautifulSoup
-from utils import is_success_response, SUCCESS_CODES
+from requests_toolbelt import MultipartEncoder
+from utils import is_success_response, SUCCESS_CODES, exponential_backoff
 
 # Load environment variables from .env file
 load_dotenv()
@@ -106,32 +108,52 @@ def upload_attachments(is_attachments, attachment_df, attachments_folder, page_i
         file_path = os.path.join(attachments_folder, filename)
         if not os.path.isfile(file_path):
             return None
-        try:
-            with open(file_path, "rb") as file:
-                files = {
-                    "file": (filename, file),
-                    "minorEdit": (None, "true"),
-                    "comment": (None, "Example attachment comment"),
-                }
-                put_response = requests.post(put_url, headers=upload_headers, files=files, timeout=60)
-            print_response_details(put_response)
-            if is_success_response(put_response.status_code):
-                put_response_data = put_response.json()
-                attachment_id = (
-                    put_response_data["results"][0]["id"]
-                    if "results" in put_response_data and len(put_response_data["results"]) > 0
-                    else None
-                )
-                if attachment_id:
-                    base_link = put_response_data["_links"]["base"]
-                    download_link = base_link + put_response_data["results"][0]["_links"]["download"]
-                    return {"file_name": filename, "attachment_id": attachment_id, "download_link": download_link}
+        for attempt in range(3):
+            try:
+                with open(file_path, "rb") as file:
+                    encoder = MultipartEncoder(fields={
+                        "file": (filename, file, "application/octet-stream"),
+                        "minorEdit": "true",
+                        "comment": "Example attachment comment",
+                    })
+                    streaming_headers = {
+                        **upload_headers,
+                        "Content-Type": encoder.content_type,
+                    }
+                    put_response = requests.post(
+                        put_url,
+                        headers=streaming_headers,
+                        data=encoder,
+                        timeout=(10, 600),
+                    )
+                print_response_details(put_response)
+                if is_success_response(put_response.status_code):
+                    put_response_data = put_response.json()
+                    attachment_id = (
+                        put_response_data["results"][0]["id"]
+                        if "results" in put_response_data and len(put_response_data["results"]) > 0
+                        else None
+                    )
+                    if attachment_id:
+                        base_link = put_response_data["_links"]["base"]
+                        download_link = base_link + put_response_data["results"][0]["_links"]["download"]
+                        return {"file_name": filename, "attachment_id": attachment_id, "download_link": download_link}
+                    else:
+                        print(f"No attachment found for {filename}.")
+                        return None
                 else:
-                    print(f"No attachment found for {filename}.")
-            else:
-                print(f"Failed to upload attachment {filename}. Status code: {put_response.status_code}")
-        except Exception as e:
-            print(f"Error uploading file {filename}: {str(e)}")
+                    print(f"Attempt {attempt + 1}: failed to upload {filename}. Status code: {put_response.status_code}")
+                    if attempt < 2:
+                        wait = exponential_backoff(attempt)
+                        print(f"Retrying in {wait}s...")
+                        time.sleep(wait)
+            except Exception as e:
+                print(f"Attempt {attempt + 1} error uploading {filename}: {str(e)}")
+                if attempt < 2:
+                    wait = exponential_backoff(attempt)
+                    print(f"Retrying in {wait}s...")
+                    time.sleep(wait)
+        print(f"All 3 upload attempts failed for {filename}.")
         return None
 
     filenames = os.listdir(attachments_folder)

@@ -25,6 +25,7 @@ from TWiki import TWiki
 import json
 import shutil
 from retrieve_urls import retrieve_urls
+from utils import exponential_backoff
 import sys
 import datetime
 from contextlib import contextmanager
@@ -380,14 +381,31 @@ def process_attachments_table(twiki, soup, page_name, topic_url_mapping):
             
             # Download the file
             file_path = os.path.join(attachments_folder, file_name)
-            try:
-                response = requests.get(file_url, auth=(user.username, user.password), timeout=60)
-                response.raise_for_status()
-                with open(file_path, "wb") as file:
-                    file.write(response.content)
-                print(f"Downloaded: {file_name}")
-            except requests.RequestException as e:
-                print(f"Failed to download {file_name}: {e}")
+            downloaded = False
+            for attempt in range(3):
+                try:
+                    response = requests.get(
+                        file_url,
+                        auth=(user.username, user.password),
+                        timeout=(10, 300),
+                        stream=True,
+                    )
+                    response.raise_for_status()
+                    with open(file_path, "wb") as file:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            if chunk:
+                                file.write(chunk)
+                    print(f"Downloaded: {file_name}")
+                    downloaded = True
+                    break
+                except requests.RequestException as e:
+                    print(f"Attempt {attempt + 1} failed to download {file_name}: {e}")
+                    if attempt < 2:
+                        wait = exponential_backoff(attempt)
+                        print(f"Retrying in {wait}s...")
+                        time.sleep(wait)
+            if not downloaded:
+                print(f"All 3 attempts failed for {file_name}, skipping.")
     else:
         print("No pub files found in the main content")
 
@@ -431,14 +449,31 @@ def process_attachments_table(twiki, soup, page_name, topic_url_mapping):
 
                 # Download the file
                 file_path = os.path.join(attachments_folder, file_name)
-                try:
-                    response = requests.get(file_url, auth=(user.username, user.password), timeout=60)
-                    response.raise_for_status()
-                    with open(file_path, "wb") as file:
-                        file.write(response.content)
-                    print(f"Downloaded: {file_name}")
-                except requests.RequestException as e:
-                    print(f"Failed to download {file_name}: {e}")
+                downloaded = False
+                for attempt in range(3):
+                    try:
+                        response = requests.get(
+                            file_url,
+                            auth=(user.username, user.password),
+                            timeout=(10, 300),
+                            stream=True,
+                        )
+                        response.raise_for_status()
+                        with open(file_path, "wb") as file:
+                            for chunk in response.iter_content(chunk_size=8192):
+                                if chunk:
+                                    file.write(chunk)
+                        print(f"Downloaded: {file_name}")
+                        downloaded = True
+                        break
+                    except requests.RequestException as e:
+                        print(f"Attempt {attempt + 1} failed to download {file_name}: {e}")
+                        if attempt < 2:
+                            wait = exponential_backoff(attempt)
+                            print(f"Retrying in {wait}s...")
+                            time.sleep(wait)
+                if not downloaded:
+                    print(f"All 3 attempts failed for {file_name}, skipping.")
 
             # Extract file metadata
             file_size = cols[4].text.strip()
