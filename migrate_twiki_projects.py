@@ -883,7 +883,14 @@ def modify_twiki_links_confluence_links(topic_url_mapping, project_name, page_na
                     a_tag.decompose()
                     # print(f'Removed edit link: {full_url}')
                     continue
-                
+
+                # Directly remap twiki/pub links from topic_url_mapping (bypass bin-only startswith check)
+                if "twiki/pub" in full_url and full_url in topic_url_mapping:
+                    mapped = topic_url_mapping[full_url]
+                    if mapped and not mapped == full_url.split("/")[-1]:
+                        a_tag["href"] = mapped
+                    continue
+
                 # Clean URL by removing view or viewauth part
                 if '/twiki/bin/view/' in clean_url:
                     parts = clean_url.split('/twiki/bin/view/')

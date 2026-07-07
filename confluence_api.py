@@ -297,19 +297,22 @@ def _perform_content_upload(content, representation, page_id, version_number, pa
         
         # Set page width if requested
         if set_width and content_response.status_code == 200:
-            # Set the width to full-width for draft version
-            print("\nTask: Setting width in draft")
-            post_url = f"https://{confluence_url}/wiki/api/v2/pages/{page_id}/properties"
-            post_payload = {"key": "content-appearance-draft", "value": "full-width"}
-            property_response = requests.post(post_url, json=post_payload, headers=headers, timeout=30)
-            print_response_details(property_response)
-
-            # Set the width to full-width for published version
-            print("\nTask: Setting width in published")
-            post_url = f"https://{confluence_url}/wiki/api/v2/pages/{page_id}/properties"
-            post_payload = {"key": "content-appearance-published", "value": "full-width"}
-            property_response = requests.post(post_url, json=post_payload, headers=headers, timeout=30)
-            print_response_details(property_response)
+            for prop_key, task_label in [
+                ("content-appearance-draft", "draft"),
+                ("content-appearance-published", "published"),
+            ]:
+                print(f"\nTask: Setting width in {task_label}")
+                props_url = f"https://{confluence_url}/wiki/api/v2/pages/{page_id}/properties"
+                post_payload = {"key": prop_key, "value": "full-width"}
+                property_response = requests.post(props_url, json=post_payload, headers=headers, timeout=30)
+                if property_response.status_code == 409:
+                    # Property already exists — fetch its version and PUT instead
+                    get_resp = requests.get(f"{props_url}/{prop_key}", headers=headers, timeout=30)
+                    if get_resp.status_code == 200:
+                        existing_version = get_resp.json().get("version", {}).get("number", 1)
+                        put_payload = {"key": prop_key, "value": "full-width", "version": {"number": existing_version + 1}}
+                        property_response = requests.put(f"{props_url}/{prop_key}", json=put_payload, headers=headers, timeout=30)
+                print_response_details(property_response)
             
         return content_response
         
